@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CANDIDATE
+  ADMIN
+  PROCTOR
+}
+
+enum ExamStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum QuestionType {
+  MCQ
+  CODING
+  SUBJECTIVE
+}
+
+enum SessionStatus {
+  STARTED
+  SUBMITTED
+  AUTO_SUBMITTED
+  TERMINATED
+}
+
+enum ReviewDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id             String           @id @default(cuid())
+  email          String           @unique
+  name           String
+  passwordHash   String
+  role           Role
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  refreshSessions RefreshSession[]
+  examAssignments ExamAssignment[]
+  sessions       Session[]        @relation("CandidateSessions")
+  adminActions   AdminAction[]    @relation("ActorAdminActions")
+}
+
+model Exam {
+  id               String           @id @default(cuid())
+  title            String
+  instructions     String
+  status           ExamStatus       @default(DRAFT)
+  durationMinutes  Int
+  startsAt         DateTime
+  endsAt           DateTime
+  createdByUserId  String
+  randomizeQuestions Boolean        @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  questions        Question[]
+  assignments      ExamAssignment[]
+  sessions         Session[]
+}
+
+model ExamAssignment {
+  id          String   @id @default(cuid())
+  examId      String
+  candidateId String
+  assignedAt  DateTime @default(now())
+  exam        Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  candidate   User     @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([examId, candidateId])
+}
+
+model Question {
+  id             String       @id @default(cuid())
+  examId         String
+  type           QuestionType
+  prompt         String
+  optionsJson    Json?
+  answerKeyJson  Json?
+  points         Int          @default(1)
+  orderIndex     Int
+  createdAt      DateTime     @default(now())
+  exam           Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  answers        Answer[]
+}
+
+model Session {
+  id                  String         @id @default(cuid())
+  examId              String
+  candidateId         String
+  status              SessionStatus  @default(STARTED)
+  reviewDecision      ReviewDecision @default(PENDING)
+  startedAt           DateTime       @default(now())
+  expiresAt           DateTime
+  submittedAt         DateTime?
+  autoScore           Float?
+  violationScore      Int            @default(0)
+  deviceFingerprint   String
+  ipAddress           String
+  webrtcRoomId        String
+  candidateSocketId   String?
+  mobileSocketId      String?
+  mobilePairedAt      DateTime?
+  exam                Exam           @relation(fields: [examId], references: [id], onDelete: Cascade)
+  candidate           User           @relation("CandidateSessions", fields: [candidateId], references: [id], onDelete: Cascade)
+  answers             Answer[]
+  score               Score?
+  adminActions        AdminAction[]
+
+  @@index([examId, candidateId])
+  @@index([status])
+}
+
+model Answer {
+  id             String    @id @default(cuid())
+  sessionId      String
+  questionId     String
+  answerType     QuestionType
+  responseJson   Json
+  latencyMs      Int?
+  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+  session        Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question       Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, questionId])
+}
+
+model Score {
+  id              String    @id @default(cuid())
+  sessionId       String    @unique
+  objectiveScore  Float
+  subjectiveScore Float?
+  finalScore      Float
+  gradedAt        DateTime  @default(now())
+  session         Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model AdminAction {
+  id          String   @id @default(cuid())
+  sessionId   String
+  actorId     String
+  actionType  String
+  reason      String
+  payloadJson Json?
+  createdAt   DateTime @default(now())
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  actor       User     @relation("ActorAdminActions", fields: [actorId], references: [id], onDelete: Cascade)
+}
+
+model RefreshSession {
+  id               String   @id @default(cuid())
+  userId           String
+  tokenJti         String   @unique
+  deviceFingerprint String
+  ipAddress        String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
